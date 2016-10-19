@@ -1,10 +1,12 @@
 #lang curly-fn racket/base
 
 (require racket/contract
+         racket/dict
          racket/format
          racket/list
          racket/match
          racket/string
+         racket/syntax
          syntax/id-table
          syntax/parse)
 
@@ -13,11 +15,14 @@
   [make-variable-like-transformer/thunk ((or/c (-> syntax?)
                                                (syntax? . -> . syntax?))
                                          . -> . (syntax? . -> . syntax?))]
+  [syntax-properties (syntax? dict? . -> . syntax?)]
   [collect-properties (syntax? any/c . -> . list?)]
   [identifiers->english-list ((listof identifier?) . -> . string?)]
   [original-for-check-syntax (syntax? . -> . syntax?)]
   [original-for-check-syntax? (syntax? . -> . boolean?)]
   [propagate-original-for-check-syntax (syntax? syntax? . -> . syntax?)]
+  [binding-arrows-props ((listof syntax?) (listof syntax?) . -> . hash?)]
+  [binding-arrows (syntax? (listof syntax?) (listof syntax?) . -> . syntax?)]
   [free-id-table-union (immutable-free-id-table? immutable-free-id-table?
                         . -> . immutable-free-id-table?)]
   [property-proxy (any/c . -> . syntax?)]
@@ -39,6 +44,12 @@
       [(id . args)
        (let ([stx* (list* '#%app #'id (cdr (syntax-e stx)))])
          (datum->syntax stx stx* stx stx))])))
+
+; Attaches multiple syntax properties to a syntax object at once.
+(define (syntax-properties stx props)
+  (for/fold ([stx stx])
+            ([(k v) (in-dict props)])
+    (syntax-property stx k v)))
 
 ; Flattens a tree into a list. Designed for use with syntax properties due to the way the syntax
 ; property merging algorithm works.
@@ -94,6 +105,20 @@
   (if (original-for-check-syntax? src-stx)
       (original-for-check-syntax result-stx)
       result-stx))
+
+; Produces a set of syntax properties that will draw binding arrows between a specific set of binders
+; and a specific set of uses, regardless of identifier lexical context.
+(define (binding-arrows-props binders uses)
+  (define tmp (generate-temporary))
+  (define (mk-tmp id)
+    (propagate-original-for-check-syntax
+     id (datum->syntax tmp (syntax-e tmp) id id)))
+  (hash 'disappeared-binding (map mk-tmp binders)
+        'disappeared-use (map mk-tmp uses)))
+
+; A simple helper that applies the result of binding-arrows-props to a syntax object.
+(define (binding-arrows stx binders uses)
+  (syntax-properties stx (binding-arrows-props binders uses)))
 
 ;; ---------------------------------------------------------------------------------------------------
 ;; free id tables
